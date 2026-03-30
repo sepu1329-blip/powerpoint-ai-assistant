@@ -365,6 +365,39 @@ function upsertLineInSpPr(shapeXml: string, lineXml: string): string {
 }
 
 // ===========================
+// 내부 헬퍼: 대시 스타일 매핑 / XML 이스케이프
+// ===========================
+
+/** PowerPoint.ShapeLineDashStyle → OOXML prstDash val 매핑 */
+function mapDashStyle(dash: any): string {
+  if (!dash) return '';
+  const s = String(dash).toLowerCase();
+  if (s.includes('dashdot') && s.includes('dot'))  return 'lgDashDotDot';
+  if (s.includes('longdashDotDot') || s === 'longdashdotdot') return 'lgDashDotDot';
+  if (s.includes('longdashdot'))  return 'lgDashDot';
+  if (s.includes('longdash'))     return 'lgDash';
+  if (s.includes('systemdashdot'))return 'sysDashDot';
+  if (s.includes('systemdash'))   return 'sysDash';
+  if (s.includes('systemdot'))    return 'sysDot';
+  if (s.includes('rounddot'))     return 'dot';
+  if (s.includes('squaredot'))    return 'dot';
+  if (s.includes('dashdot'))      return 'dashDot';
+  if (s.includes('dash'))         return 'dash';
+  if (s.includes('dot'))          return 'dot';
+  return '';
+}
+
+/** XML 특수문자 이스케이프 */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+// ===========================
 // OOXML 기반 공개 함수들
 // ===========================
 
@@ -421,38 +454,122 @@ export async function duplicateShapeOoxml(params: OoxmlDuplicateParams): Promise
 
     if (!targetShape) throw new Error('복제할 도형을 찾을 수 없습니다.');
 
-    const targetId = targetShape.id;
-    const targetName = targetShape.name;
     const offsetX = params.offsetX ?? 20;
     const offsetY = params.offsetY ?? 20;
 
-    // 현재 슬라이드 OOXML 가져오기
-    const ooxml: string = await new Promise((resolve, reject) => {
-      (Office.context.document as any).getSelectedDataAsync(
-        'ooxml',
-        (result: any) => {
-          if (result.status === Office.AsyncResultStatus.Succeeded) resolve(result.value);
-          else reject(new Error('OOXML 읽기 실패'));
-        }
-      );
-    });
+    // 상세 속성 로드 (위치, 채우기, 테두리)
+    targetShape.load('left,top,width,height,type');
+    await context.sync();
 
-    // 대상 도형 블록 찾아 복제
-    const modifiedOoxml = cloneShapeBlockInOoxml(ooxml, targetId, targetName, offsetX, offsetY);
+    // 채우기 색상
+    let fillXml = '<a:noFill/>';
+    try {
+      targetShape.fill.load('type,foregroundColor,transparency');
+      await context.sync();
+      if (targetShape.fill.type === PowerPoint.ShapeFillType.solid) {
+        const c = (targetShape.fill.foregroundColor ?? '#4472C4').replace('#', '');
+        const a = Math.round((1 - (targetShape.fill.transparency ?? 0)) * 100000);
+        fillXml = `<a:solidFill><a:srgbClr val="${c}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill>`;
+      }
+    } catch (_e) { /* 기본값 */ }
 
-    // 수정된 OOXML 적용
+    // 테두리
+    let lineXml = '';
+    try {
+      targetShape.lineFormat.load('color,weight,dashStyle,visible');
+      await context.sync();
+      if (targetShape.lineFormat.visible !== false) {
+        const lc = (targetShape.lineFormat.color ?? '#000000').replace('#', '');
+        const lw = Math.round((targetShape.lineFormat.weight ?? 0.75) * 12700);
+        const dv = mapDashStyle(targetShape.lineFormat.dashStyle);
+        const dashXml = dv ? `<a:prstDash val="${dv}"/>` : '';
+        lineXml = `<a:ln w="${lw}"><a:solidFill><a:srgbClr val="${lc}"/></a:solidFill>${dashXml}</a:ln>`;
+      } else {
+        lineXml = '<a:ln><a:noFill/></a:ln>';
+      }
+    } catch (_e) { /* 테두리 없음 */ }
+
+    // 텍스트
+    let textBodyXml = '<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody>';
+    try {
+      targetShape.textFrame.load('hasText');
+      await context.sync();
+      if (targetShape.textFrame.hasText) {
+        targetShape.textFrame.textRange.load('text');
+        targetShape.textFrame.textRange.font.load('bold,color,size');
+        await context.sync();
+        const txt = targetShape.textFrame.textRange.text ?? '';
+        const bold = targetShape.textFrame.textRange.font.bold ?? false;
+        const fc   = (targetShape.textFrame.textRange.font.color ?? '').replace('#', '');
+        const fsSz = Math.round((targetShape.textFrame.textRange.font.size ?? 18) * 100);
+        const boldXml = bold ? ' b="1"' : '';
+        const fcXml   = fc ? `<a:solidFill><a:srgbClr val="${fc}"/></a:solidFill>` : '';
+        textBodyXml = `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ko-KR" sz="${fsSz}"${boldXml}>${fcXml}</a:rPr><a:t>${escapeXml(txt)}</a:t></a:r></a:p></p:txBody>`;
+      }
+    } catch (_e) { /* 텍스트 없음 */ }
+
+    // 위치 계산 (포인트 → EMU)
+    const newLeftEmu = Math.round((targetShape.left  + offsetX) * 12700);
+    const newTopEmu  = Math.round((targetShape.top   + offsetY) * 12700);
+    const widthEmu   = Math.round( targetShape.width  * 12700);
+    const heightEmu  = Math.round( targetShape.height * 12700);
+    const newShapeId = Math.floor(Math.random() * 90000) + 10000;
+    const newName    = `\uBCF5\uC0AC\uBCF8 ${Date.now() % 10000}`;
+
+    // Flat OPC OOXML 패키지 구성 후 setSelectedDataAsync로 삽입
+    // PowerPoint는 setSelectedDataAsync + coercionType:'ooxml' 을 지원
+    const ooxmlPackage = `<?xml version="1.0" encoding="utf-8"?>
+<pkg:package xmlns:pkg="http://schemas.microsoft.com/office/2006/xmlPackage">
+  <pkg:part pkg:name="/_rels/.rels"
+    pkg:contentType="application/vnd.openxmlformats-package.relationships+xml" pkg:padding="512">
+    <pkg:xmlData>
+      <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+        <Relationship Id="rId1"
+          Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+          Target="ppt/presentation.xml"/>
+      </Relationships>
+    </pkg:xmlData>
+  </pkg:part>
+  <pkg:part pkg:name="/ppt/slides/slide1.xml"
+    pkg:contentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml">
+    <pkg:xmlData>
+      <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+             xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+        <p:cSld><p:spTree>
+          <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
+          <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/>
+            <a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
+          <p:sp>
+            <p:nvSpPr>
+              <p:cNvPr id="${newShapeId}" name="${newName}"/>
+              <p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr>
+              <p:nvPr/>
+            </p:nvSpPr>
+            <p:spPr>
+              <a:xfrm><a:off x="${newLeftEmu}" y="${newTopEmu}"/><a:ext cx="${widthEmu}" cy="${heightEmu}"/></a:xfrm>
+              <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+              ${fillXml}
+              ${lineXml}
+            </p:spPr>
+            ${textBodyXml}
+          </p:sp>
+        </p:spTree></p:cSld>
+      </p:sld>
+    </pkg:xmlData>
+  </pkg:part>
+</pkg:package>`;
+
     await new Promise<void>((resolve, reject) => {
       (Office.context.document as any).setSelectedDataAsync(
-        modifiedOoxml,
+        ooxmlPackage,
         { coercionType: 'ooxml' },
         (result: any) => {
           if (result.status === Office.AsyncResultStatus.Succeeded) resolve();
-          else reject(new Error('OOXML 쓰기 실패: ' + result.error?.message));
+          else reject(new Error('도형 삽입 실패: ' + (result.error?.message ?? JSON.stringify(result.error))));
         }
       );
     });
-
-    await context.sync();
   });
 }
 
