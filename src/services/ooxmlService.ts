@@ -461,24 +461,29 @@ export async function duplicateShapeOoxml(params: OoxmlDuplicateParams): Promise
     targetShape.load('left,top,width,height,type');
     await context.sync();
 
-    // 채우기 색상
+    // 채우기 색상 - 열거형 대신 문자열 비교로 'solid' 체크
     let fillXml = '<a:noFill/>';
     try {
       targetShape.fill.load('type,foregroundColor,transparency');
       await context.sync();
-      if (targetShape.fill.type === PowerPoint.ShapeFillType.solid) {
+      const fillType = String(targetShape.fill.type ?? '').toLowerCase();
+      if (fillType === 'solid' || fillType === '2') {
         const c = (targetShape.fill.foregroundColor ?? '#4472C4').replace('#', '');
-        const a = Math.round((1 - (targetShape.fill.transparency ?? 0)) * 100000);
+        const transparency = targetShape.fill.transparency ?? 0;
+        const a = Math.round((1 - transparency) * 100000);
         fillXml = `<a:solidFill><a:srgbClr val="${c}"><a:alpha val="${a}"/></a:srgbClr></a:solidFill>`;
       }
-    } catch (_e) { /* 기본값 */ }
+    } catch (_e) {
+      console.warn('채우기 속성 로드 실패, 기본값 사용:', _e);
+    }
 
     // 테두리
     let lineXml = '';
     try {
       targetShape.lineFormat.load('color,weight,dashStyle,visible');
       await context.sync();
-      if (targetShape.lineFormat.visible !== false) {
+      const isVisible = targetShape.lineFormat.visible;
+      if (isVisible !== false) {
         const lc = (targetShape.lineFormat.color ?? '#000000').replace('#', '');
         const lw = Math.round((targetShape.lineFormat.weight ?? 0.75) * 12700);
         const dv = mapDashStyle(targetShape.lineFormat.dashStyle);
@@ -487,7 +492,9 @@ export async function duplicateShapeOoxml(params: OoxmlDuplicateParams): Promise
       } else {
         lineXml = '<a:ln><a:noFill/></a:ln>';
       }
-    } catch (_e) { /* 테두리 없음 */ }
+    } catch (_e) {
+      console.warn('테두리 속성 로드 실패, 테두리 없음으로 처리:', _e);
+    }
 
     // 텍스트
     let textBodyXml = '<p:txBody><a:bodyPr/><a:lstStyle/><a:p/></p:txBody>';
@@ -506,7 +513,10 @@ export async function duplicateShapeOoxml(params: OoxmlDuplicateParams): Promise
         const fcXml   = fc ? `<a:solidFill><a:srgbClr val="${fc}"/></a:solidFill>` : '';
         textBodyXml = `<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="ko-KR" sz="${fsSz}"${boldXml}>${fcXml}</a:rPr><a:t>${escapeXml(txt)}</a:t></a:r></a:p></p:txBody>`;
       }
-    } catch (_e) { /* 텍스트 없음 */ }
+    } catch (_e) {
+      console.warn('텍스트 속성 로드 실패, 빈 텍스트 사용:', _e);
+    }
+
 
     // 위치 계산 (포인트 → EMU)
     const newLeftEmu = Math.round((targetShape.left  + offsetX) * 12700);

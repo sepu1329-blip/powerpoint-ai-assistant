@@ -545,25 +545,36 @@ export async function duplicateShape(params: DuplicateShapeParams): Promise<void
         }
       } catch(e) {}
 
-      // 가능한 한 원본과 동일한 도형 생성 (기본은 사각형/텍스트박스)
-      if (targetShape.type === PowerPoint.ShapeType.geometricShape) {
-        const dup = slide.shapes.addGeometricShape(PowerPoint.GeometricShapeType.rectangle, {
-          left: targetShape.left + (params.offsetX ?? 20),
-          top: targetShape.top + (params.offsetY ?? 20),
-          width: targetShape.width,
-          height: targetShape.height
-        });
-        if (textToCopy) {
-           dup.textFrame.textRange.text = textToCopy;
-        }
+      // 열거형 대신 문자열 비교로 도형 타입 판별
+      const shapeTypeStr = String(targetShape.type ?? '').toLowerCase();
+      const isGeometric = shapeTypeStr === 'geometricshape' || shapeTypeStr === '1';
+
+      if (isGeometric) {
         try {
-          if (targetShape.fill && targetShape.fill.foregroundColor) {
-            dup.fill.setSolidColor(targetShape.fill.foregroundColor);
-          }
-          if (targetShape.lineFormat && targetShape.lineFormat.color) {
-            dup.lineFormat.color = targetShape.lineFormat.color;
-          }
-        } catch(e) {}
+          // addGeometricShape 대신 addTextBox로 대체 (열거형 문제 회피)
+          const dup = slide.shapes.addTextBox(textToCopy, {
+            left: targetShape.left + (params.offsetX ?? 20),
+            top: targetShape.top + (params.offsetY ?? 20),
+            width: targetShape.width,
+            height: targetShape.height
+          });
+          try {
+            if (targetShape.fill && targetShape.fill.foregroundColor) {
+              dup.fill.setSolidColor(targetShape.fill.foregroundColor);
+            }
+            if (targetShape.lineFormat && targetShape.lineFormat.color) {
+              dup.lineFormat.color = targetShape.lineFormat.color;
+            }
+          } catch(e) {}
+        } catch (e) {
+          // 최후 수단: 텍스트박스로 추가
+          slide.shapes.addTextBox(textToCopy, {
+            left: targetShape.left + (params.offsetX ?? 20),
+            top: targetShape.top + (params.offsetY ?? 20),
+            width: targetShape.width,
+            height: targetShape.height
+          });
+        }
       } else {
         slide.shapes.addTextBox(textToCopy, {
           left: targetShape.left + (params.offsetX ?? 20),
