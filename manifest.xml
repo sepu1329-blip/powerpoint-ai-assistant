@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <Id>a7b8c9d0-e1f2-3456-789a-bcdef0123456</Id>
+  <Version>1.0.0.1</Version>
+  <ProviderName>Press AI</ProviderName>
+  <DefaultLocale>ko-KR</DefaultLocale>
+
+  <DisplayName DefaultValue="Press AI"/>
+  <Description DefaultValue="Gemini AI를 활용한 PowerPoint 편집 도우미. Press AI로 슬라이드를 더 빠르고 정확하게 만드세요."/>
+
+
+  <IconUrl DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/assets/PressAI_Re.png"/>
+  <HighResolutionIconUrl DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/assets/PressAI_Re.png"/>
+
+  <SupportUrl DefaultValue="https://github.com/sepu1329-blip/powerpoint-ai-assistant"/>
+
+  <AppDomains>
+    <AppDomain>https://generativelanguage.googleapis.com</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Presentation" />
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/index.html"/>
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Presentation">
+        <DesktopFormFactor>
+          <GetStarted>
+            <Title resid="GetStarted.Title"/>
+            <Description resid="GetStarted.Description"/>
+            <LearnMoreUrl resid="LearnMoreUrlValue"/>
+          </GetStarted>
+          
+          <FunctionFile resid="Taskpane.Url"/>
+
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="ppt.ai.group">
+                <Label resid="GroupLabel"/>
+                <Icon>
+                  <bt:Image size="16" resid="Icon.16x16"/>
+                  <bt:Image size="32" resid="Icon.32x32"/>
+                  <bt:Image size="80" resid="Icon.80x80"/>
+                </Icon>
+                <Control xsi:type="Button" id="ppt.ai.taskpane.button">
+                  <Label resid="TaskpaneButton.Label"/>
+                  <Supertip>
+                    <Title resid="TaskpaneButton.Label"/>
+                    <Description resid="TaskpaneButton.Tooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>ButtonId1</TaskpaneId>
+                    <SourceLocation resid="Taskpane.Url"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <bt:Image id="Icon.16x16" DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/assets/PressAI_Re.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/assets/PressAI_Re.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/assets/PressAI_Re.png"/>
+      </bt:Images>
+
+      <bt:Urls>
+        <bt:Url id="Taskpane.Url" DefaultValue="https://sepu1329-blip.github.io/powerpoint-ai-assistant/index.html"/>
+        <bt:Url id="LearnMoreUrlValue" DefaultValue="https://github.com/sepu1329-blip/powerpoint-ai-assistant"/>
+      </bt:Urls>
+
+      <bt:ShortStrings>
+        <bt:String id="GroupLabel" DefaultValue="Press AI"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Press AI"/>
+        <bt:String id="GetStarted.Title" DefaultValue="Press AI"/>
+      </bt:ShortStrings>
+
+      <bt:LongStrings>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Gemini AI로 슬라이드를 편집하세요"/>
+        <bt:String id="GetStarted.Description" DefaultValue="PowerPoint AI Assistant를 사용해 슬라이드를 더 빠르게 만들어보세요."/>
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>
+
