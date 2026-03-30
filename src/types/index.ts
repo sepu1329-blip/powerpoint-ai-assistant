@@ -3,6 +3,15 @@
 // ===========================
 export type MessageRole = 'user' | 'assistant' | 'system';
 
+export type AgentStepStatus = 'running' | 'done' | 'error';
+
+export interface AgentStep {
+  id: string;
+  label: string;          // 작업 단계 설명 (예: "슬라이드 분석 중...")
+  status: AgentStepStatus;
+  detail?: string;        // 추가 상세 정보 (선택)
+}
+
 export interface ChatMessage {
   id: string;
   role: MessageRole;
@@ -10,6 +19,7 @@ export interface ChatMessage {
   timestamp: Date;
   actions?: SlideAction[];   // AI가 제안하는 슬라이드 수정 액션
   applied?: boolean;         // 액션 적용 여부
+  steps?: AgentStep[];       // AI 에이전트 작업 단계 로그
 }
 
 // ===========================

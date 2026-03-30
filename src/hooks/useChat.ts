@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import type { ChatMessage, SlideAction, PresentationContext } from '../types';
+import type { ChatMessage, SlideAction, PresentationContext, AgentStep } from '../types';
 import { sendMessage, isGeminiReady } from '../services/gemini';
 import { getPresentationContext, executeAction } from '../services/officeContext';
 
@@ -53,22 +53,60 @@ export function useChat() {
       };
       setMessages((prev) => [...prev, userMsg]);
 
-      // AI 응답 메시지 준비 (스트리밍)
+      // AI 응답 메시지 준비 (스트리밍 + steps 초기화)
       const assistantMsgId = `assistant-${Date.now()}`;
+      const initialSteps: AgentStep[] = [
+        { id: 'step-ctx', label: 'PowerPoint 슬라이드 콘텐츠 분석', status: 'running' },
+      ];
       const assistantMsg: ChatMessage = {
         id: assistantMsgId,
         role: 'assistant',
         content: '',
         timestamp: new Date(),
         actions: [],
+        steps: initialSteps,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+
+      // steps 업데이트 헬퍼
+      const updateStep = (stepId: string, patch: Partial<AgentStep>) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  steps: (m.steps ?? []).map((s) =>
+                    s.id === stepId ? { ...s, ...patch } : s
+                  ),
+                }
+              : m
+          )
+        );
+      };
+
+      const addStep = (step: AgentStep) => {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantMsgId
+              ? { ...m, steps: [...(m.steps ?? []), step] }
+              : m
+          )
+        );
+      };
 
       setIsLoading(true);
 
       try {
-        // 컨텍스트 가져오기
+        // 콘텍스트 가져오기
         const ctx = useContext ? await refreshContext() : null;
+        updateStep('step-ctx', {
+          status: 'done',
+          detail: ctx
+            ? `슬라이드 ${(ctx.currentSlideIndex ?? 0) + 1}/${ctx.slideCount}종, 객체 ${ctx.currentSlide?.shapes?.length ?? 0}개 인식`
+            : '콘텍스트 없음 (오프라인 모드)',
+        });
+
+        addStep({ id: 'step-ai', label: 'AI 응답 생성 중', status: 'running' });
         setStatusText('AI 응답 생성 중...');
 
         // 대화 히스토리 구성 (Gemini 형식)
@@ -80,12 +118,17 @@ export function useChat() {
             parts: [{ text: m.content }],
           }));
 
+        let streamChunkCount = 0;
         await sendMessage(
           text,
           ctx,
           history,
           (chunk) => {
             if (abortRef.current) return;
+            streamChunkCount++;
+            if (streamChunkCount === 1) {
+              updateStep('step-ai', { label: 'AI 응답 수신 중' });
+            }
             setStatusText('AI가 슬라이드 변경 사항을 구성 중...');
             setMessages((prev) =>
               prev.map((m) =>
@@ -105,6 +148,23 @@ export function useChat() {
             finalContent = '죄송합니다. 응답을 생성하는 중 오류가 발생했거나 내용이 비어 있습니다.';
           }
 
+          // AI 응답 단계 완료 표시
+          updateStep('step-ai', {
+            status: 'done',
+            label: 'AI 응답 완료',
+            detail: fullText.length > 0 ? `${fullText.length}자 스트리밍` : undefined,
+          });
+
+          // 액션이 있으면 단계 추가
+          if (actions && actions.length > 0) {
+            addStep({
+              id: 'step-actions',
+              label: `슬라이드 수정 액션 ${actions.length}개 준비됨`,
+              status: 'done',
+              detail: actions.map((a) => a.description || a.type).join(', '),
+            });
+          }
+
           setMessages((prev) =>
             prev.map((m) =>
               m.id === assistantMsgId
@@ -115,6 +175,7 @@ export function useChat() {
         });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : '알 수 없는 오류가 발생했습니다.';
+        updateStep('step-ai', { status: 'error', detail: errMsg });
         setError(errMsg);
         setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
       } finally {
@@ -133,6 +194,22 @@ export function useChat() {
     setIsLoading(true);
     setStatusText('슬라이드에 변경 사항 적용 중...');
 
+    // 적용 단계 추가
+    const applyStepId = `step-apply-${Date.now()}`;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === messageId
+          ? {
+              ...m,
+              steps: [
+                ...(m.steps ?? []),
+                { id: applyStepId, label: '슬라이드에 변경 사항 적용 중...', status: 'running' as const },
+              ],
+            }
+          : m
+      )
+    );
+
     try {
       for (const action of msg.actions) {
         await executeAction(action);
@@ -140,11 +217,36 @@ export function useChat() {
       
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === messageId ? { ...m, applied: true } : m
+          m.id === messageId
+            ? {
+                ...m,
+                applied: true,
+                steps: (m.steps ?? []).map((s) =>
+                  s.id === applyStepId
+                    ? { ...s, status: 'done' as const, label: '슬라이드에 변경 사항 적용 완료', detail: `${msg.actions!.length}개 액션 완료` }
+                    : s
+                ),
+              }
+            : m
         )
       );
     } catch (err) {
       console.error('액션 실행 실패:', err);
+      const errMsg = err instanceof Error ? err.message : '완료';
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                steps: (m.steps ?? []).map((s) =>
+                  s.id === applyStepId
+                    ? { ...s, status: 'error' as const, label: '슬라이드 수정 실패', detail: errMsg }
+                    : s
+                ),
+              }
+            : m
+        )
+      );
       setError('슬라이드 수정 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
