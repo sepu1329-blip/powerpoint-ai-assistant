@@ -18,6 +18,8 @@ export function useChat() {
   const [context, setContext] = useState<PresentationContext | null>(null);
 
   const abortRef = useRef<boolean>(false);
+  // 현재 assistant 메시지 ID 추적 (중지 시 steps 정리용)
+  const currentMsgIdRef = useRef<string | null>(null);
 
   // 컨텍스트 새로고침
   const refreshContext = useCallback(async () => {
@@ -55,6 +57,7 @@ export function useChat() {
 
       // AI 응답 메시지 준비 (스트리밍 + steps 초기화)
       const assistantMsgId = `assistant-${Date.now()}`;
+      currentMsgIdRef.current = assistantMsgId;
       const initialSteps: AgentStep[] = [
         { id: 'step-ctx', label: 'PowerPoint 슬라이드 콘텐츠 분석', status: 'running' },
       ];
@@ -179,6 +182,7 @@ export function useChat() {
         setError(errMsg);
         setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
       } finally {
+        currentMsgIdRef.current = null;
         setIsLoading(false);
         setStatusText(null);
       }
@@ -186,21 +190,28 @@ export function useChat() {
     [isLoading, messages, refreshContext]
   );
 
-  // 액션 적용 실행
+  // 액션 적용 실행 (isLoading과 독립적으로 동작)
   const markActionsApplied = useCallback(async (messageId: string) => {
-    const msg = messages.find(m => m.id === messageId);
-    if (!msg || !msg.actions || msg.applied) return;
+    // 이미 applied된 메시지이거나 없으면 무시
+    let targetMsg: ChatMessage | undefined;
+    setMessages(prev => {
+      targetMsg = prev.find(m => m.id === messageId);
+      return prev;
+    });
+    // 최신 messages에서 직접 찾기
+    targetMsg = messages.find(m => m.id === messageId);
+    if (!targetMsg || !targetMsg.actions || targetMsg.applied) return;
 
-    setIsLoading(true);
-    setStatusText('슬라이드에 변경 사항 적용 중...');
-
-    // 적용 단계 추가
+    const actionsToRun = targetMsg.actions;
     const applyStepId = `step-apply-${Date.now()}`;
+
+    // 낙관적 업데이트: applied = true로 먼저 마킹하여 중복 실행 방지
     setMessages((prev) =>
       prev.map((m) =>
         m.id === messageId
           ? {
               ...m,
+              applied: true,
               steps: [
                 ...(m.steps ?? []),
                 { id: applyStepId, label: '슬라이드에 변경 사항 적용 중...', status: 'running' as const },
@@ -211,19 +222,18 @@ export function useChat() {
     );
 
     try {
-      for (const action of msg.actions) {
+      for (const action of actionsToRun) {
         await executeAction(action);
       }
-      
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
             ? {
                 ...m,
-                applied: true,
                 steps: (m.steps ?? []).map((s) =>
                   s.id === applyStepId
-                    ? { ...s, status: 'done' as const, label: '슬라이드에 변경 사항 적용 완료', detail: `${msg.actions!.length}개 액션 완료` }
+                    ? { ...s, status: 'done' as const, label: `슬라이드 적용 완료 (${actionsToRun.length}개)` }
                     : s
                 ),
               }
@@ -232,12 +242,14 @@ export function useChat() {
       );
     } catch (err) {
       console.error('액션 실행 실패:', err);
-      const errMsg = err instanceof Error ? err.message : '완료';
+      const errMsg = err instanceof Error ? err.message : '알 수 없는 오류';
+      // 실패 시 applied 원복 + 오류 표시
       setMessages((prev) =>
         prev.map((m) =>
           m.id === messageId
             ? {
                 ...m,
+                applied: false,
                 steps: (m.steps ?? []).map((s) =>
                   s.id === applyStepId
                     ? { ...s, status: 'error' as const, label: '슬라이드 수정 실패', detail: errMsg }
@@ -247,10 +259,8 @@ export function useChat() {
             : m
         )
       );
-      setError('슬라이드 수정 중 오류가 발생했습니다.');
+      setError(`슬라이드 수정 중 오류: ${errMsg}`);
     } finally {
-      setIsLoading(false);
-      setStatusText(null);
       await refreshContext();
     }
   }, [messages, refreshContext]);
@@ -273,6 +283,26 @@ export function useChat() {
     abortRef.current = true;
     setIsLoading(false);
     setStatusText(null);
+    // 현재 진행 중인 메시지의 running steps를 취소 상태로 변경
+    const msgId = currentMsgIdRef.current;
+    if (msgId) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msgId
+            ? {
+                ...m,
+                content: m.content || '생성이 중단되었습니다.',
+                steps: (m.steps ?? []).map((s) =>
+                  s.status === 'running'
+                    ? { ...s, status: 'error' as const, label: s.label.replace('중...', '중단됨').replace('중', '중단됨'), detail: '사용자가 중단함' }
+                    : s
+                ),
+              }
+            : m
+        )
+      );
+      currentMsgIdRef.current = null;
+    }
   }, []);
 
   return {

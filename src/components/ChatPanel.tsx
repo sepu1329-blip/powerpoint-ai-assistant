@@ -150,13 +150,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         </div>
       )}
 
-      {/* 실시간 상태 표시줄 */}
-      {isLoading && statusText && (
-        <div style={{ padding: '4px 16px', background: '#fef9c3', borderBottom: '1px solid #fef08a', fontSize: '11px', color: '#854d0e', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <div className="spinner" style={{ width: '12px', height: '12px', border: '2px solid #fde047', borderTopColor: '#854d0e' }}></div>
-          {statusText}
-        </div>
-      )}
+
+
 
       {/* 메시지 영역 */}
       <div className="messages-container" style={{ flex: 1, overflowY: 'auto' }}>
